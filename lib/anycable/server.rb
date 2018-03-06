@@ -1,21 +1,35 @@
 # frozen_string_literal: true
 
-require 'grpc'
+#require 'grpc'
 require 'anycable/rpc_handler'
 
 module Anycable
   # Wrapper over GRPC server
   module Server
     class << self
-      attr_reader :grpc_server
-
+      @running = true
       def start
         log_grpc! if Anycable.config.log_grpc
-        @grpc_server ||= build_server
 
-        Anycable.logger.info "RPC server is listening on #{Anycable.config.rpc_host}"
-        Anycable.logger.info "Broadcasting Redis channel: #{Anycable.config.redis_channel}"
-        grpc_server.run_till_terminated
+        rpc = RPCHandler.new
+        loop do
+          if msg = Anycable.from_client.pop_without_blocking
+            begin
+              rpc.handle(msg.body)
+              msg.finish
+              sleep 0.001
+            rescue StandardError
+              if msg.attempts < 5
+                msg.requeue(5 * 1000)
+              else
+                msg.finish
+              end
+            end
+          else
+            # wait for a bit before checking for new messages
+            sleep 0.01
+          end
+        end
       end
 
       def stop
@@ -27,19 +41,11 @@ module Anycable
         grpc_server&.running_state == :running
       end
 
-      # Enable GRPC logging
       def log_grpc!
-        GRPC.define_singleton_method(:logger) { Anycable.logger }
       end
 
       private
 
-      def build_server
-        GRPC::RpcServer.new.tap do |server|
-          server.add_http2_port(Anycable.config.rpc_host, :this_port_is_insecure)
-          server.handle(Anycable::RPCHandler)
-        end
-      end
     end
   end
 end

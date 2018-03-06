@@ -34,6 +34,35 @@ module Anycable
       @config ||= Config.new
     end
 
+    def to_client
+      return @to_client if @to_client
+      
+      cfg = {topic: config.to_client_topic}
+      if config.to_client_lookupd
+        cfg[:nsqlookupd] = config.to_client_lookupd
+      else
+        cfg[:nsqd] = config.to_client_nsqd
+      end
+      @to_client ||= Nsq::Producer.new(cfg)
+    end
+
+    def from_client
+      return @from_client if @from_client
+      
+      cfg = {
+        topic: config.from_client_topic, 
+        channel: config.from_client_channel, 
+        msg_timeout: config.from_client_msg_timeout, 
+        max_in_flight: config.from_client_max_in_flight
+      }
+      if config.from_client_lookupd
+        cfg[:nsqlookupd] = config.from_client_lookupd
+      else
+        cfg[:nsqd] = config.from_client_nsqd
+      end
+      @from_client ||= Nsq::Consumer.new(cfg)
+    end
+
     def configure
       yield(config) if block_given?
     end

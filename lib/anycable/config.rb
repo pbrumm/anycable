@@ -7,10 +7,17 @@ module Anycable
   class Config < Anyway::Config
     config_name :anycable
 
-    attr_config rpc_host: "localhost:50051",
-                redis_url: "redis://localhost:6379/5",
-                redis_sentinels: [],
-                redis_channel: "__anycable__",
+    attr_config to_client_topic: "ws_fromrails",
+                to_client_nsqd: "localhost:4150",
+                to_client_lookupd: nil,
+
+                from_client_topic: "ws_fromclient",
+                from_client_channel: "rails",
+                from_client_nsqd: "localhost:4150",
+                from_client_lookupd: nil,
+                from_client_msg_timeout: 5000,
+                from_client_max_in_flight: 5,
+                
                 log_file: nil,
                 log_level: :info,
                 log_grpc: false,

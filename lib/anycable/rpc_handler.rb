@@ -1,40 +1,48 @@
 # frozen_string_literal: true
 
 require 'anycable/socket'
-require 'anycable/rpc/rpc_pb'
-require 'anycable/rpc/rpc_services_pb'
 
-require 'anycable/handler/exceptions_handling'
-
-# rubocop:disable Metrics/AbcSize
-# rubocop:disable Metrics/MethodLength
 module Anycable
   # RPC service handler
-  class RPCHandler < Anycable::RPC::Service
-    prepend Handler::ExceptionsHandling
-
+  class RPCHandler 
+    def handle(data)
+      request = JSON.parse(data)
+      #binding.pry
+      case request['command']
+      when "connect"
+        connect(request)
+      when "disconnect"
+      when "perform", "subscribe", "unsubscribe"
+        perform(request)
+      end
+    end
     # Handle connection request from WebSocket server
-    def connect(request, _unused_call)
+    def connect(request)
       logger.debug("RPC Connect: #{request}")
 
       socket = build_socket(env: rack_env(request))
-
       connection = factory.call(socket)
-
+      
       connection.handle_open
-
       if socket.closed?
-        Anycable::ConnectionResponse.new(status: Anycable::Status::FAILURE)
+        Anycable.to_client.write({
+          "ws_id" => request["ws_id"],
+          "command" => request["command"],
+          "status" => "failure"
+        }.to_json)
       else
-        Anycable::ConnectionResponse.new(
-          status: Anycable::Status::SUCCESS,
-          identifiers: connection.identifiers_json,
-          transmissions: socket.transmissions
-        )
+
+        Anycable.to_client.write({
+          "ws_id" => request["ws_id"],
+          "command" => request["command"],
+          "status" => "success",
+          "identifiers" => connection.identifiers_json,
+          "transmissions" => socket.transmissions
+        }.to_json)
       end
     end
 
-    def disconnect(request, _unused_call)
+    def disconnect(request)
       logger.debug("RPC Disonnect: #{request}")
 
       socket = build_socket(env: rack_env(request))
@@ -52,36 +60,54 @@ module Anycable
       end
     end
 
-    def command(message, _unused_call)
+    def perform(message)
       logger.debug("RPC Command: #{message}")
-
-      socket = build_socket
+      msg = JSON.load(message["message"])
+      socket = build_socket(env: rack_env(message))
 
       connection = factory.call(
         socket,
-        identifiers: message.connection_identifiers
+        identifiers: msg["identifier"]
       )
-
+      message["command"] = "message" if message["command"] == "perform"
+      begin
+        connection.connect
+      rescue ActionCable::Connection::Authorization::UnauthorizedError => e
+        Anycable.to_client.write({
+          "ws_id"         => message["ws_id"],
+          "command"       => message["command"],
+          "status"        => "failure",
+          "disconnect"    => true,
+          "stop_streams"  => true,
+          "streams"       => [],
+          "identifiers"   => nil,
+          "transmissions" => []
+        }.to_json)
+        return
+      end
       result = connection.handle_channel_command(
-        message.identifier,
-        message.command,
-        message.data
+        msg["identifier"],
+        message["command"],
+        msg["data"]
       )
 
-      Anycable::CommandResponse.new(
-        status: result ? Anycable::Status::SUCCESS : Anycable::Status::FAILURE,
-        disconnect: socket.closed?,
-        stop_streams: socket.stop_streams?,
-        streams: socket.streams,
-        transmissions: socket.transmissions
-      )
+      Anycable.to_client.write({
+        "ws_id"         => message["ws_id"],
+        "command"       => message["command"],
+        "status"        => result ? "success" : "failure",
+        "disconnect"    => socket.closed?,
+        "stop_streams"  => socket.stop_streams?,
+        "streams"       => socket.streams,
+        "identifiers"   => msg["identifier"],
+        "transmissions" => socket.transmissions
+      }.to_json)
     end
 
     private
 
     # Build env from path
     def rack_env(request)
-      uri = URI.parse(request.path)
+      uri = URI.parse(request['path'])
       {
         'QUERY_STRING' => uri.query,
         'SCRIPT_NAME' => '',
@@ -92,7 +118,7 @@ module Anycable
         'rack.request.form_input' => '',
         'rack.input' => '',
         'rack.request.form_hash' => {}
-      }.merge(build_headers(request.headers))
+      }.merge(build_headers(request['headers']))
     end
 
     def build_socket(**options)
