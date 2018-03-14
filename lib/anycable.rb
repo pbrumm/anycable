@@ -38,7 +38,7 @@ module Anycable
       return @to_client if @to_client
       
       cfg = {topic: config.to_client_topic}
-      if config.to_client_lookupd
+      if config.to_client_lookupd && config.to_client_lookupd != "nil"
         cfg[:nsqlookupd] = config.to_client_lookupd
       else
         cfg[:nsqd] = config.to_client_nsqd
@@ -55,7 +55,7 @@ module Anycable
         msg_timeout: config.from_client_msg_timeout, 
         max_in_flight: config.from_client_max_in_flight
       }
-      if config.from_client_lookupd
+      if config.from_client_lookupd && config.from_client_lookupd != "nil"
         cfg[:nsqlookupd] = config.from_client_lookupd
       else
         cfg[:nsqd] = config.from_client_nsqd
