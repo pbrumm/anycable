@@ -71,11 +71,14 @@ module Anycable
       )
       message["command"] = "message" if message["command"] == "perform"
       begin
+        #binding.pry
         connection.connect
+
       rescue ActionCable::Connection::Authorization::UnauthorizedError => e
+
         Anycable.to_client.write({
           "ws_id"         => message["ws_id"],
-          "command"       => message["command"],
+          "command"       => "perform",
           "status"        => "failure",
           "disconnect"    => true,
           "stop_streams"  => true,
